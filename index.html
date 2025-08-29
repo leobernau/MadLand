@@ -5,7 +5,7 @@
 <title>Monster Survival Game</title>
 <style>
 body { margin:0; overflow:hidden; background:#222; }
-canvas { display:block; margin:0 auto; background: #6c9; }
+canvas { display:block; margin:0 auto; background: #3cb043; } /* grünes Gras */
 #ui { position:absolute; top:0; left:0; width:100%; height:100%; pointer-events:none; font-family:sans-serif; color:white; }
 #timer { position:absolute; top:20px; left:50%; transform:translateX(-50%); font-size:36px; font-weight:bold; }
 #gameOverMenu, #upgradeMenu { position:absolute; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.7); display:none; justify-content:center; align-items:center; flex-direction:column; color:white; font-size:24px; }
@@ -34,7 +34,6 @@ const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');
 let cw = canvas.width = window.innerWidth;
 let ch = canvas.height = window.innerHeight;
-
 window.addEventListener('resize', ()=>{cw=canvas.width=window.innerWidth; ch=canvas.height=window.innerHeight;});
 
 const keys = {};
@@ -51,7 +50,7 @@ function loadSounds(){
     const fx = ['shoot','hit','dash','crystal','levelup'];
     fx.forEach(name=>{
         const audio = new Audio();
-        audio.src = `data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAESsAACJWAAACABAAZGF0YQAAAAA=`; // leer placeholder
+        audio.src = `data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAESsAACJWAAACABAAZGF0YQAAAAA=`;
         sounds[name] = audio;
     });
 }
@@ -63,7 +62,7 @@ const player = {
     y: ch/2,
     size: 40,
     speed: 4,
-    dashSpeed: 15,
+    dashSpeed: 10,
     dashCooldown:0,
     dashDir:{x:0,y:0},
     hp:100,
@@ -75,8 +74,8 @@ const player = {
 // ==== World ====
 let worldOffset = {x:0,y:0};
 const worldObjects = [];
-for(let i=0;i<100;i++){
-    worldObjects.push({x:Math.random()*5000-2500, y:Math.random()*5000-2500, type:Math.random()<0.5?'tree':'rock'});
+for(let i=0;i<300;i++){
+    worldObjects.push({x:Math.random()*6000-3000, y:Math.random()*6000-3000, type:Math.random()<0.6?'tree':'rock'});
 }
 
 // ==== Monsters ====
@@ -93,27 +92,35 @@ class Monster {
         this.x += (dx/dist)*this.speed;
         this.y += (dy/dist)*this.speed;
         if(dist<this.size+player.size){
-            player.hp -= 0.5; // Monster hit
-            sounds.hit.play();
+            player.hp -= 0.5;
+            if(player.hp<=0){ gameOver=true; document.getElementById('gameOverMenu').style.display='flex'; }
         }
     }
     draw(){
         if(!this.alive) return;
-        ctx.fillStyle='red';
+        // Monster Detail: Kopf und Körper
+        ctx.fillStyle='darkred';
         ctx.beginPath();
-        ctx.arc(this.x - worldOffset.x,this.y - worldOffset.y,this.size,0,Math.PI*2);
+        ctx.ellipse(this.x - worldOffset.x,this.y - worldOffset.y,this.size, this.size*0.7,0,0,Math.PI*2);
         ctx.fill();
+        ctx.fillStyle='black';
+        ctx.fillRect(this.x-15 - worldOffset.x,this.y-35 - worldOffset.y,10,5);
+        ctx.fillRect(this.x+5 - worldOffset.x,this.y-35 - worldOffset.y,10,5);
         // healthbar
         ctx.fillStyle='black';
-        ctx.fillRect(this.x-20 - worldOffset.x,this.y-30 - worldOffset.y,40,5);
+        ctx.fillRect(this.x-20 - worldOffset.x,this.y-45 - worldOffset.y,40,5);
         ctx.fillStyle='lime';
-        ctx.fillRect(this.x-20 - worldOffset.x,this.y-30 - worldOffset.y,40*(this.hp/this.maxHp),5);
+        ctx.fillRect(this.x-20 - worldOffset.x,this.y-45 - worldOffset.y,40*(this.hp/this.maxHp),5);
     }
 }
 const monsters=[];
-for(let i=0;i<20;i++){
-    monsters.push(new Monster(Math.random()*2000-1000,Math.random()*2000-1000,'orc'));
+
+function spawnMonster(){
+    const x = Math.random()*2000-1000 + worldOffset.x;
+    const y = Math.random()*2000-1000 + worldOffset.y;
+    monsters.push(new Monster(x,y,'orc'));
 }
+setInterval(spawnMonster, 2000); // endlos spawn
 
 // ==== Projectiles ====
 class Projectile{
@@ -131,7 +138,12 @@ class Projectile{
             this.target.hp -= 10;
             sounds.hit.play();
             this.alive=false;
-            if(this.target.hp<=0){this.target.alive=false;}
+            if(this.target.hp<=0){
+                this.target.alive=false;
+                // Kristall Drop
+                const type = Math.random()<0.3?'big':'small';
+                crystals.push(new Crystal(this.target.x,this.target.y,type));
+            }
         }
     }
     draw(){
@@ -160,14 +172,9 @@ class Crystal{
         ctx.fill();
     }
 }
-const crystals=[];
 
-// ==== Upgrade System ====
-const allUpgrades = [
-    {name:'Bienen', level:0},
-    {name:'Heilung', level:0},
-    {name:'Feuerball', level:0}
-];
+// ==== Upgrades ====
+const allUpgrades = [{name:'Bienen', level:0},{name:'Heilung', level:0},{name:'Feuerball', level:0}];
 function showUpgradeMenu(){
     upgradeMenuActive=true;
     document.getElementById('upgradeMenu').style.display='flex';
@@ -178,7 +185,7 @@ function showUpgradeMenu(){
         let u = allUpgrades[Math.floor(Math.random()*allUpgrades.length)];
         if(!options.includes(u)) options.push(u);
     }
-    options.forEach((u,i)=>{
+    options.forEach(u=>{
         const btn = document.createElement('button');
         btn.innerText=u.name;
         btn.onclick=()=>{
@@ -215,7 +222,7 @@ function updateTimer(){
 // ==== Dash ====
 function handleDash(){
     if(keys[' '] && player.dashCooldown<=0){
-        player.dashCooldown=60; // frames cooldown
+        player.dashCooldown=30; // frames cooldown
         player.dashDir = {...player.lastDir};
         if(player.dashDir.x===0 && player.dashDir.y===0) player.dashDir={x:0,y:-1};
         sounds.dash.play();
@@ -248,8 +255,7 @@ let shootTimer=0;
 function handleShooting(){
     shootTimer--;
     if(shootTimer<=0){
-        shootTimer=30; // 0.5s
-        // nearest monster
+        shootTimer=30;
         let nearest=null; let ndist=99999;
         monsters.forEach(m=>{
             if(m.alive){
@@ -276,12 +282,13 @@ function gameLoop(){
     // Draw world
     worldObjects.forEach(o=>{
         if(o.type==='tree'){
-            ctx.fillStyle='darkgreen';
+            // Stamm
+            ctx.fillStyle='sienna';
+            ctx.fillRect(o.x - worldOffset.x-5, o.y - worldOffset.y,10,20);
+            // Krone
+            ctx.fillStyle='green';
             ctx.beginPath();
-            ctx.moveTo(o.x - worldOffset.x,o.y - worldOffset.y);
-            ctx.lineTo(o.x-10 - worldOffset.x,o.y+20 - worldOffset.y);
-            ctx.lineTo(o.x+10 - worldOffset.x,o.y+20 - worldOffset.y);
-            ctx.closePath();
+            ctx.arc(o.x - worldOffset.x,o.y-10 - worldOffset.y,15,0,Math.PI*2);
             ctx.fill();
         }else{
             ctx.fillStyle='gray';
@@ -291,21 +298,20 @@ function gameLoop(){
         }
     });
 
-    // Monsters
     monsters.forEach(m=>{ m.update(); m.draw(); });
-
-    // Projectiles
     projectiles.forEach(p=>{ p.update(); p.draw(); });
-
-    // Crystals
     crystals.forEach(c=>c.draw());
 
-    // Draw player
+    // Player
     ctx.fillStyle='blue';
     ctx.beginPath();
-    ctx.arc(player.x,player.y,player.size,0,Math.PI*2);
+    ctx.ellipse(player.x,player.y,20,30,0,0,Math.PI*2); // Körper
     ctx.fill();
-    // player health
+    ctx.fillStyle='peachpuff';
+    ctx.beginPath();
+    ctx.arc(player.x,player.y-30,10,0,Math.PI*2); // Kopf
+    ctx.fill();
+    // Healthbar
     ctx.fillStyle='black';
     ctx.fillRect(player.x-50,player.y+50,100,10);
     ctx.fillStyle='lime';
