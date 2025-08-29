@@ -4,341 +4,380 @@
 <meta charset="UTF-8">
 <title>Epic Survival Game</title>
 <style>
-  body { margin:0; overflow:hidden; background:#87CEEB; }
-  canvas { display:block; margin:0 auto; background:#4CAF50; }
-  #upgradeMenu, #gameOverMenu {
-    position:absolute; top:50%; left:50%; transform:translate(-50%,-50%);
-    background:rgba(0,0,0,0.8); padding:20px; border-radius:15px; color:white;
-    font-family:sans-serif; display:none; z-index:10; text-align:center;
+  html, body {
+    margin:0; padding:0; overflow:hidden; background:#000;
   }
-  button { margin:10px; padding:10px 20px; font-size:18px; border:none; border-radius:10px; cursor:pointer; }
+  canvas {
+    display:block; background: #87ceeb; /* Himmelblau */
+  }
+  #ui {
+    position:absolute; top:10px; left:50%; transform:translateX(-50%);
+    color:white; font-family:sans-serif; font-size:32px; text-shadow:2px 2px 5px black;
+  }
+  #upgradeMenu, #gameOverMenu {
+    position:absolute; top:0; left:0; width:100%; height:100%;
+    background:rgba(0,0,0,0.8); color:white; font-family:sans-serif; display:flex;
+    flex-direction:column; align-items:center; justify-content:center; font-size:24px;
+    display:none;
+  }
+  .upgradeOption {
+    margin:10px; padding:10px 20px; border:2px solid white; cursor:pointer; transition:all 0.3s;
+  }
+  .upgradeOption:hover {
+    background:white; color:black;
+  }
+  #restartButton {
+    margin-top:20px; padding:10px 20px; border:2px solid white; cursor:pointer;
+  }
 </style>
 </head>
 <body>
 <canvas id="gameCanvas"></canvas>
-
+<div id="ui">45:00</div>
 <div id="upgradeMenu">
-  <h2>Wähle ein Upgrade</h2>
+  <div>Wähle ein Upgrade:</div>
   <div id="upgradeOptions"></div>
 </div>
-
 <div id="gameOverMenu">
-  <h2>Game Over!</h2>
-  <p id="gameOverText"></p>
-  <button onclick="restartGame()">Neustarten</button>
+  <div>GAME OVER</div>
+  <div id="easterEgg" style="margin:10px; font-size:16px;">✨</div>
+  <div id="restartButton">Neustart</div>
 </div>
 
 <script>
-const canvas = document.getElementById('gameCanvas');
-const ctx = canvas.getContext('2d');
-let width = window.innerWidth;
-let height = window.innerHeight;
-canvas.width = width;
-canvas.height = height;
+/* -------------------
+  GAME INITIALIZATION
+------------------- */
+const canvas = document.getElementById("gameCanvas");
+const ctx = canvas.getContext("2d");
+let cw = canvas.width = window.innerWidth;
+let ch = canvas.height = window.innerHeight;
 
+window.addEventListener('resize', ()=>{
+  cw = canvas.width = window.innerWidth;
+  ch = canvas.height = window.innerHeight;
+});
+
+/* -------------------
+  GAME VARIABLES
+------------------- */
 let keys = {};
-let mouse = {x:0, y:0};
-let lastDashTime = 0;
-let dashCooldown = 1000;
-
 let player = {
-  x: width/2, y: height/2,
-  size:40,
-  hp:100,
-  maxHp:100,
-  speed:4,
-  lastDirection:{x:0,y:-1},
-  dashSpeed:15,
-  dashDuration:200,
-  dashing:false,
-  dashStart:0
+  x: cw/2, y: ch/2, size:50, speed:5, health:100, maxHealth:100,
+  lastDir:{x:0,y:-1}, dashCooldown:0
 };
-
 let monsters = [];
-let projectiles = [];
-let crystals = [];
+let bullets = [];
+let particles = [];
 let upgrades = [];
-let gameTime = 45*60*1000;
-let lastFrame = Date.now();
+let crystals = [];
 let score = 0;
 let level = 1;
+let upgradePoints = 0;
+let timeLeft = 45*60; // in seconds
 let gamePaused = false;
 let gameOver = false;
 
-// Farben & Assets
-function drawGrass(x,y,w,h){
-  ctx.fillStyle = "#3CB043";
-  ctx.fillRect(x,y,w,h);
-  for(let i=0;i<10;i++){
-    ctx.fillStyle = "#2E8B57";
-    ctx.beginPath();
-    let gx = x + Math.random()*w;
-    let gy = y + Math.random()*h;
-    ctx.moveTo(gx,gy);
-    ctx.lineTo(gx+2,gy-10);
-    ctx.lineTo(gx+4,gy);
-    ctx.fill();
-  }
-}
+/* -------------------
+  EVENT LISTENERS
+------------------- */
+document.addEventListener('keydown', e=>{
+  keys[e.key.toLowerCase()]=true;
+});
+document.addEventListener('keyup', e=>{
+  keys[e.key.toLowerCase()]=false;
+});
+document.getElementById("restartButton").addEventListener('click', ()=>{
+  restartGame();
+});
 
-function drawTree(x,y){
-  ctx.fillStyle="#8B4513";
-  ctx.fillRect(x-5,y,10,40);
-  ctx.fillStyle="#228B22";
-  ctx.beginPath();
-  ctx.arc(x,y,20,0,Math.PI*2);
-  ctx.fill();
-}
+/* -------------------
+  HELPER FUNCTIONS
+------------------- */
+function rand(min,max){ return Math.random()*(max-min)+min; }
+function distance(a,b){ return Math.hypot(a.x-b.x, a.y-b.y); }
+function clamp(v,min,max){ return Math.max(min, Math.min(max,v)); }
 
-function drawRock(x,y){
-  ctx.fillStyle="#808080";
-  ctx.beginPath();
-  ctx.moveTo(x,y);
-  ctx.lineTo(x+15,y+5);
-  ctx.lineTo(x+10,y+20);
-  ctx.lineTo(x-5,y+15);
-  ctx.fill();
-}
-
-// Spieler
-function drawPlayer(p){
+/* -------------------
+  SPRITE DRAW FUNCTIONS
+------------------- */
+function drawPlayer(){
   ctx.save();
-  ctx.translate(p.x,p.y);
-  ctx.fillStyle="blue";
+  ctx.translate(player.x,player.y);
+  // Körper
+  ctx.fillStyle="#ffcc00";
   ctx.beginPath();
-  ctx.arc(0,0,p.size/2,0,Math.PI*2);
+  ctx.ellipse(0,0,20,30,0,0,Math.PI*2);
   ctx.fill();
-  // Arme & Beine
-  ctx.strokeStyle="black";
-  ctx.lineWidth=4;
+  // Kopf
+  ctx.fillStyle="#ffe0b3";
   ctx.beginPath();
-  ctx.moveTo(0,0);
-  ctx.lineTo(0,-p.size/2); // Arm
-  ctx.moveTo(0,0);
-  ctx.lineTo(-p.size/4,p.size/2); // Bein
-  ctx.moveTo(0,0);
-  ctx.lineTo(p.size/4,p.size/2);
-  ctx.stroke();
+  ctx.arc(0,-35,15,0,Math.PI*2);
+  ctx.fill();
+  // Arme
+  ctx.strokeStyle="#ffe0b3"; ctx.lineWidth=6;
+  ctx.beginPath(); ctx.moveTo(-15,0); ctx.lineTo(-25,15); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(15,0); ctx.lineTo(25,15); ctx.stroke();
+  // Beine
+  ctx.beginPath(); ctx.moveTo(-10,30); ctx.lineTo(-15,45); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(10,30); ctx.lineTo(15,45); ctx.stroke();
   ctx.restore();
 }
 
-// Healthbar
-function drawHealth(x,y,hp,maxHp){
-  ctx.fillStyle="red";
-  ctx.fillRect(x-25,y-40,50,6);
-  ctx.fillStyle="lime";
-  ctx.fillRect(x-25,y-40,50*(hp/maxHp),6);
-}
-
-// Monster
-class Monster{
-  constructor(x,y,type){
-    this.x = x;
-    this.y = y;
-    this.type = type;
-    this.hp = 30 + Math.random()*20*level;
-    this.maxHp = this.hp;
-    this.size = 30 + Math.random()*20;
-    this.speed = 1+Math.random()*1;
-  }
-  move(){
-    let dx = player.x - this.x;
-    let dy = player.y - this.y;
-    let dist = Math.hypot(dx,dy);
-    this.x += dx/dist*this.speed;
-    this.y += dy/dist*this.speed;
-  }
-  draw(){
-    ctx.fillStyle="purple";
-    ctx.beginPath();
-    ctx.arc(this.x,this.y,this.size/2,0,Math.PI*2);
-    ctx.fill();
-    drawHealth(this.x,this.y,this.hp,this.maxHp);
-  }
-}
-
-// Projektil
-class Projectile{
-  constructor(x,y,target){
-    this.x = x;
-    this.y = y;
-    this.target = target;
-    this.speed = 10;
-    this.size = 5;
-  }
-  update(){
-    let dx = this.target.x - this.x;
-    let dy = this.target.y - this.y;
-    let dist = Math.hypot(dx,dy);
-    this.x += dx/dist*this.speed;
-    this.y += dy/dist*this.speed;
-    if(dist<5){
-      this.target.hp -= 10;
-      if(this.target.hp<=0){
-        spawnCrystal(this.target.x,this.target.y);
-        monsters.splice(monsters.indexOf(this.target),1);
-        score +=1;
-      }
-      projectiles.splice(projectiles.indexOf(this),1);
-    }
-  }
-  draw(){
-    ctx.fillStyle="yellow";
-    ctx.beginPath();
-    ctx.arc(this.x,this.y,this.size,0,Math.PI*2);
-    ctx.fill();
-  }
-}
-
-// Kristall
-function spawnCrystal(x,y){
-  crystals.push({x:x,y:y,size:10+Math.random()*10});
-}
-
-function drawCrystal(c){
-  ctx.fillStyle="cyan";
+function drawMonster(mon){
+  ctx.save();
+  ctx.translate(mon.x,mon.y);
+  // Körper
+  ctx.fillStyle=mon.color;
   ctx.beginPath();
-  ctx.moveTo(c.x,c.y-c.size);
-  ctx.lineTo(c.x+c.size/2,c.y+c.size/2);
-  ctx.lineTo(c.x-c.size/2,c.y+c.size/2);
-  ctx.closePath();
+  ctx.ellipse(0,0,mon.sizeX,mon.sizeY,0,0,Math.PI*2);
   ctx.fill();
+  // Healthbar
+  ctx.fillStyle="red";
+  ctx.fillRect(-mon.sizeX,-mon.sizeY-10,mon.sizeX*2*(mon.health/mon.maxHealth),5);
+  ctx.strokeStyle="black";
+  ctx.strokeRect(-mon.sizeX,-mon.sizeY-10,mon.sizeX*2,5);
+  ctx.restore();
 }
 
-// Steuerung
-window.addEventListener("keydown",e=>{keys[e.key.toLowerCase()]=true;});
-window.addEventListener("keyup",e=>{keys[e.key.toLowerCase()]=false;});
-window.addEventListener("mousemove",e=>{mouse.x=e.clientX; mouse.y=e.clientY;});
-
-// Dash
-function tryDash(){
-  let now = Date.now();
-  if(now-lastDashTime>dashCooldown){
-    lastDashTime = now;
-    player.dashing = true;
-    player.dashStart = now;
-    player.lastDirection = {x:0,y:-1};
-    if(keys['w']) player.lastDirection.y=-1;
-    if(keys['s']) player.lastDirection.y=1;
-    if(keys['a']) player.lastDirection.x=-1;
-    if(keys['d']) player.lastDirection.x=1;
-  }
+function drawCrystal(cr){
+  ctx.save();
+  ctx.translate(cr.x,cr.y);
+  ctx.fillStyle=cr.color;
+  ctx.beginPath();
+  ctx.moveTo(0,-10); ctx.lineTo(5,0); ctx.lineTo(0,10); ctx.lineTo(-5,0); ctx.closePath();
+  ctx.fill();
+  ctx.restore();
 }
 
-// Upgrade Menü
-function showUpgradeMenu(){
-  gamePaused=true;
-  let menu = document.getElementById("upgradeMenu");
-  let optionsDiv = document.getElementById("upgradeOptions");
-  optionsDiv.innerHTML = "";
-  for(let i=0;i<3;i++){
-    let btn = document.createElement("button");
-    btn.innerText="Upgrade "+(i+1);
-    btn.onclick=function(){
-      gamePaused=false;
-      menu.style.display="none";
-    }
-    optionsDiv.appendChild(btn);
-  }
-  menu.style.display="block";
-}
-
-// Game Over
-function triggerGameOver(){
-  gameOver=true;
-  let menu = document.getElementById("gameOverMenu");
-  document.getElementById("gameOverText").innerText="Dein Score: "+score;
-  menu.style.display="block";
-}
-
-// Restart
-function restartGame(){
-  location.reload();
-}
-
-// Main Loop
-function gameLoop(){
-  let now = Date.now();
-  let delta = now-lastFrame;
-  lastFrame=now;
+/* -------------------
+  GAME LOOP
+------------------- */
+let lastTime=0;
+function gameLoop(ts){
+  const delta=(ts-lastTime)/16.666; // ~60fps
+  lastTime=ts;
   if(!gamePaused && !gameOver){
-    // Hintergrund
-    ctx.clearRect(0,0,width,height);
-    drawGrass(0,0,width,height);
-    for(let i=0;i<10;i++) drawTree(Math.random()*width,Math.random()*height);
-    for(let i=0;i<5;i++) drawRock(Math.random()*width,Math.random()*height);
-
-    // Spieler Bewegung
-    let dx=0, dy=0;
-    if(keys['w']) dy=-player.speed;
-    if(keys['s']) dy=player.speed;
-    if(keys['a']) dx=-player.speed;
-    if(keys['d']) dx=player.speed;
-    player.x += dx;
-    player.y += dy;
-
-    // Dash
-    if(player.dashing){
-      player.x += player.lastDirection.x*player.dashSpeed;
-      player.y += player.lastDirection.y*player.dashSpeed;
-      if(now-player.dashStart>player.dashDuration) player.dashing=false;
-    }
-
-    // Monster Spawn
-    if(monsters.length<10+level){
-      monsters.push(new Monster(Math.random()*width,Math.random()*height,"orc"));
-    }
-
-    // Monster Update
-    monsters.forEach(m=>m.move());
-    // Collision Player-Monster
-    monsters.forEach(m=>{
-      let dist = Math.hypot(m.x-player.x, m.y-player.y);
-      if(dist<m.size/2+player.size/2){
-        player.hp -= 0.2;
-        if(player.hp<=0) triggerGameOver();
-      }
-    });
-
-    // Projektil Auto-Attack
-    if(monsters.length>0 && now%500<delta){
-      let closest = monsters.reduce((prev,curr)=>{
-        let pd = Math.hypot(prev.x-player.x,prev.y-player.y);
-        let cd = Math.hypot(curr.x-player.x,curr.y-player.y);
-        return cd<pd?curr:prev;
-      });
-      projectiles.push(new Projectile(player.x,player.y,closest));
-    }
-
-    // Update Projektile
-    projectiles.forEach(p=>p.update());
-
-    // Draw Spieler
-    drawPlayer(player);
-    drawHealth(player.x,player.y,player.hp,player.maxHp);
-
-    // Draw Monster
-    monsters.forEach(m=>m.draw());
-
-    // Draw Projektile
-    projectiles.forEach(p=>p.draw());
-
-    // Draw Kristalle
-    crystals.forEach(c=>drawCrystal(c));
-
-    // Timer
-    gameTime -= delta;
-    ctx.fillStyle="white";
-    ctx.font="40px sans-serif";
-    let minutes = Math.floor(gameTime/60000);
-    let seconds = Math.floor((gameTime%60000)/1000);
-    ctx.fillText(minutes.toString().padStart(2,'0')+":"+seconds.toString().padStart(2,'0'),width/2-50,50);
-    if(gameTime<=0) triggerGameOver();
+    update(delta);
+    draw();
   }
   requestAnimationFrame(gameLoop);
 }
 
-gameLoop();
+function update(delta){
+  handlePlayer(delta);
+  handleMonsters(delta);
+  handleBullets(delta);
+  handleCrystals(delta);
+  updateTimer(delta);
+  handleParticles(delta);
+}
+
+function draw(){
+  ctx.clearRect(0,0,cw,ch);
+  drawWorld();
+  drawCrystals();
+  drawPlayer();
+  drawMonsters();
+  drawBullets();
+  drawParticles();
+  drawUI();
+}
+
+/* -------------------
+  WORLD
+------------------- */
+function drawWorld(){
+  // Grasboden
+  ctx.fillStyle="#228B22";
+  ctx.fillRect(0,0,cw,ch);
+  // Bäume zufällig
+  for(let i=0;i<20;i++){
+    let tx=(i*50+50)%cw;
+    let ty=(i*80+30)%ch;
+    ctx.fillStyle="#8B4513";
+    ctx.fillRect(tx-5,ty,10,30);
+    ctx.fillStyle="#006400";
+    ctx.beginPath();
+    ctx.moveTo(tx-25,ty); ctx.lineTo(tx+25,ty); ctx.lineTo(tx,ty-40); ctx.closePath();
+    ctx.fill();
+  }
+}
+
+/* -------------------
+  PLAYER
+------------------- */
+function handlePlayer(delta){
+  let dx=0,dy=0;
+  if(keys['w']){ dy=-1; player.lastDir.y=-1; player.lastDir.x=0; }
+  if(keys['s']){ dy=1; player.lastDir.y=1; player.lastDir.x=0; }
+  if(keys['a']){ dx=-1; player.lastDir.x=-1; player.lastDir.y=0; }
+  if(keys['d']){ dx=1; player.lastDir.x=1; player.lastDir.y=0; }
+  player.x+=dx*player.speed*delta;
+  player.y+=dy*player.speed*delta;
+  player.x=clamp(player.x,50,cw-50);
+  player.y=clamp(player.y,50,ch-50);
+
+  // Dash
+  if(keys[' ']){
+    if(player.dashCooldown<=0){
+      player.x+=player.lastDir.x*20*delta;
+      player.y+=player.lastDir.y*20*delta;
+      player.dashCooldown=60; // 1s Cooldown ~60 frames
+    }
+  }
+  if(player.dashCooldown>0) player.dashCooldown-=delta;
+}
+
+/* -------------------
+  MONSTERS
+------------------- */
+function handleMonsters(delta){
+  // Spawn zufällig
+  if(monsters.length<10+level){
+    if(Math.random()<0.02){
+      spawnMonster();
+    }
+  }
+  monsters.forEach(mon=>{
+    let angle=Math.atan2(player.y-mon.y,player.x-mon.x);
+    mon.x+=Math.cos(angle)*mon.speed*delta;
+    mon.y+=Math.sin(angle)*mon.speed*delta;
+    // Collision mit Player
+    if(distance(mon,player)<30){
+      player.health-=0.2*delta;
+      if(player.health<=0){ gameOver=true; showGameOver(); }
+    }
+  });
+}
+function spawnMonster(){
+  let monTypes=[
+    {sizeX:20,sizeY:30,color:"purple",speed:1,health:30,maxHealth:30},
+    {sizeX:25,sizeY:25,color:"green",speed:1.5,health:40,maxHealth:40},
+    {sizeX:30,sizeY:40,color:"red",speed:0.8,health:60,maxHealth:60}
+  ];
+  let type=monTypes[Math.floor(Math.random()*monTypes.length)];
+  let m={
+    x:Math.random()*cw,
+    y:Math.random()*ch,
+    ...type
+  };
+  monsters.push(m);
+}
+function drawMonsters(){monsters.forEach(drawMonster);}
+
+/* -------------------
+  BULLETS
+------------------- */
+function handleBullets(delta){
+  bullets.forEach((b,i)=>{
+    b.x+=b.vx*delta;
+    b.y+=b.vy*delta;
+    // Hit detection
+    monsters.forEach((m,j)=>{
+      if(distance(b,m)<20){
+        m.health-=b.damage;
+        particles.push({x:b.x,y:b.y,life:20,r:3,color:"yellow"});
+        bullets.splice(i,1);
+      }
+    });
+  });
+  bullets = bullets.filter(b=>b.x>0 && b.x<cw && b.y>0 && b.y<ch);
+}
+
+function drawBullets(){
+  bullets.forEach(b=>{
+    ctx.fillStyle=b.color; ctx.beginPath(); ctx.arc(b.x,b.y,5,0,Math.PI*2); ctx.fill();
+  });
+}
+
+// Auto-shoot every 0.5s
+let shootTimer=0;
+function autoShoot(delta){
+  shootTimer-=delta;
+  if(shootTimer<=0){
+    if(monsters.length>0){
+      let target=monsters[0];
+      let angle=Math.atan2(target.y-player.y,target.x-player.x);
+      bullets.push({
+        x:player.x, y:player.y,
+        vx:Math.cos(angle)*10, vy:Math.sin(angle)*10,
+        damage:10, color:"cyan"
+      });
+      shootTimer=30; // ~0.5s
+    }
+  }
+}
+
+/* -------------------
+  CRYSTALS
+------------------- */
+function handleCrystals(delta){
+  crystals.forEach((cr,i)=>{
+    if(distance(cr,player)<30){
+      crystals.splice(i,1);
+      score+=cr.value;
+      upgradePoints+=1;
+    }
+  });
+}
+function drawCrystals(){crystals.forEach(drawCrystal);}
+
+/* -------------------
+  PARTICLES
+------------------- */
+function handleParticles(delta){
+  particles.forEach((p,i)=>{
+    p.life-=delta;
+    p.x+=rand(-1,1)*delta; p.y+=rand(-1,1)*delta;
+  });
+  particles = particles.filter(p=>p.life>0);
+}
+function drawParticles(){
+  particles.forEach(p=>{
+    ctx.fillStyle=p.color;
+    ctx.beginPath(); ctx.arc(p.x,p.y,p.r,0,Math.PI*2); ctx.fill();
+  });
+}
+
+/* -------------------
+  TIMER & UI
+------------------- */
+function updateTimer(delta){
+  timeLeft-=delta/60;
+  if(timeLeft<=0){ gamePaused=true; alert("Du hast gewonnen!"); }
+}
+function drawUI(){
+  const ui = document.getElementById("ui");
+  let min=Math.floor(timeLeft/60);
+  let sec=Math.floor(timeLeft%60);
+  ui.textContent=`${String(min).padStart(2,'0')}:${String(sec).padStart(2,'0')}`;
+  // Healthbar
+  ctx.fillStyle="red";
+  ctx.fillRect(50,20,200*(player.health/player.maxHealth),20);
+  ctx.strokeStyle="white";
+  ctx.strokeRect(50,20,200,20);
+}
+
+/* -------------------
+  GAME OVER & UPGRADE MENU
+------------------- */
+function showGameOver(){
+  document.getElementById("gameOverMenu").style.display="flex";
+}
+function restartGame(){
+  player.health=player.maxHealth;
+  monsters=[]; bullets=[]; particles=[]; crystals=[]; score=0; level=1; upgradePoints=0; timeLeft=45*60;
+  gamePaused=false; gameOver=false;
+  document.getElementById("gameOverMenu").style.display="none";
+}
+
+/* -------------------
+  MAIN LOOP START
+------------------- */
+setInterval(()=>{ if(!gamePaused&&!gameOver) autoShoot(1); },16);
+requestAnimationFrame(gameLoop);
+
 </script>
 </body>
 </html>
